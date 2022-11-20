@@ -7,12 +7,7 @@ import "./ErrorReporter.sol";
 import "./EIP20Interface.sol";
 import "./InterestRateModel.sol";
 import "./ExponentialNoError.sol";
-
-/**
- * @title Compound's CToken Contract
- * @notice Abstract base for CTokens
- * @author Compound
- */
+ 
 abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorReporter {
     /**
      * @notice Initialize the money market
@@ -42,7 +37,7 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
 
         // Initialize block number and borrow index (block number mocks depend on comptroller being set)
         accrualBlockNumber = getBlockNumber();
-        borrowIndex = mantissaOne;
+        borrowIndex = mantissaOne; // 初始值是1
 
         // Set the interest rate model (depends on block number / borrow index)
         err = _setInterestRateModelFresh(interestRateModel_);
@@ -54,135 +49,14 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
 
         // The counter starts true to prevent changing it from zero to non-zero (i.e. smaller cost/refund)
         _notEntered = true;
-    }
+    }      
 
-    /**
-     * @notice Transfer `tokens` tokens from `src` to `dst` by `spender`
-     * @dev Called by both `transfer` and `transferFrom` internally
-     * @param spender The address of the account performing the transfer
-     * @param src The address of the source account
-     * @param dst The address of the destination account
-     * @param tokens The number of tokens to transfer
-     * @return 0 if the transfer succeeded, else revert
-     */
-    function transferTokens(address spender, address src, address dst, uint tokens) internal returns (uint) {
-        /* Fail if transfer not allowed */
-        uint allowed = comptroller.transferAllowed(address(this), src, dst, tokens);
-        if (allowed != 0) {
-            revert TransferComptrollerRejection(allowed);
-        }
-
-        /* Do not allow self-transfers */
-        if (src == dst) {
-            revert TransferNotAllowed();
-        }
-
-        /* Get the allowance, infinite for the account owner */
-        uint startingAllowance = 0;
-        if (spender == src) {
-            startingAllowance = type(uint).max;
-        } else {
-            startingAllowance = transferAllowances[src][spender];
-        }
-
-        /* Do the calculations, checking for {under,over}flow */
-        uint allowanceNew = startingAllowance - tokens;
-        uint srcTokensNew = accountTokens[src] - tokens;
-        uint dstTokensNew = accountTokens[dst] + tokens;
-
-        /////////////////////////
-        // EFFECTS & INTERACTIONS
-        // (No safe failures beyond this point)
-
-        accountTokens[src] = srcTokensNew;
-        accountTokens[dst] = dstTokensNew;
-
-        /* Eat some of the allowance (if necessary) */
-        if (startingAllowance != type(uint).max) {
-            transferAllowances[src][spender] = allowanceNew;
-        }
-
-        /* We emit a Transfer event */
-        emit Transfer(src, dst, tokens);
-
-        // unused function
-        // comptroller.transferVerify(address(this), src, dst, tokens);
-
-        return NO_ERROR;
-    }
-
-    /**
-     * @notice Transfer `amount` tokens from `msg.sender` to `dst`
-     * @param dst The address of the destination account
-     * @param amount The number of tokens to transfer
-     * @return Whether or not the transfer succeeded
-     */
-    function transfer(address dst, uint256 amount) override external nonReentrant returns (bool) {
-        return transferTokens(msg.sender, msg.sender, dst, amount) == NO_ERROR;
-    }
-
-    /**
-     * @notice Transfer `amount` tokens from `src` to `dst`
-     * @param src The address of the source account
-     * @param dst The address of the destination account
-     * @param amount The number of tokens to transfer
-     * @return Whether or not the transfer succeeded
-     */
-    function transferFrom(address src, address dst, uint256 amount) override external nonReentrant returns (bool) {
-        return transferTokens(msg.sender, src, dst, amount) == NO_ERROR;
-    }
-
-    /**
-     * @notice Approve `spender` to transfer up to `amount` from `src`
-     * @dev This will overwrite the approval amount for `spender`
-     *  and is subject to issues noted [here](https://eips.ethereum.org/EIPS/eip-20#approve)
-     * @param spender The address of the account which may transfer tokens
-     * @param amount The number of tokens that are approved (uint256.max means infinite)
-     * @return Whether or not the approval succeeded
-     */
-    function approve(address spender, uint256 amount) override external returns (bool) {
-        address src = msg.sender;
-        transferAllowances[src][spender] = amount;
-        emit Approval(src, spender, amount);
-        return true;
-    }
-
-    /**
-     * @notice Get the current allowance from `owner` for `spender`
-     * @param owner The address of the account which owns the tokens to be spent
-     * @param spender The address of the account which may transfer tokens
-     * @return The number of tokens allowed to be spent (-1 means infinite)
-     */
-    function allowance(address owner, address spender) override external view returns (uint256) {
-        return transferAllowances[owner][spender];
-    }
-
-    /**
-     * @notice Get the token balance of the `owner`
-     * @param owner The address of the account to query
-     * @return The number of tokens owned by `owner`
-     */
-    function balanceOf(address owner) override external view returns (uint256) {
-        return accountTokens[owner];
-    }
-
-    /**
-     * @notice Get the underlying balance of the `owner`
-     * @dev This also accrues interest in a transaction
-     * @param owner The address of the account to query
-     * @return The amount of underlying owned by `owner`
-     */
+    // 底层资产余额 
     function balanceOfUnderlying(address owner) override external returns (uint) {
         Exp memory exchangeRate = Exp({mantissa: exchangeRateCurrent()});
         return mul_ScalarTruncate(exchangeRate, accountTokens[owner]);
     }
-
-    /**
-     * @notice Get a snapshot of the account's balances, and the cached exchange rate
-     * @dev This is used by comptroller to more efficiently perform liquidity checks.
-     * @param account Address of the account to snapshot
-     * @return (possible error, token balance, borrow balance, exchange rate mantissa)
-     */
+    
     function getAccountSnapshot(address account) override external view returns (uint, uint, uint, uint) {
         return (
             NO_ERROR,
@@ -192,42 +66,29 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
         );
     }
 
-    /**
-     * @dev Function to simply retrieve block number
-     *  This exists mainly for inheriting test contracts to stub this result.
-     */
     function getBlockNumber() virtual internal view returns (uint) {
         return block.number;
     }
 
-    /**
-     * @notice Returns the current per-block borrow interest rate for this cToken
-     * @return The borrow interest rate per block, scaled by 1e18
-     */
+    //调用利率模型, 查询借款利率
     function borrowRatePerBlock() override external view returns (uint) {
         return interestRateModel.getBorrowRate(getCashPrior(), totalBorrows, totalReserves);
     }
 
-    /**
-     * @notice Returns the current per-block supply interest rate for this cToken
-     * @return The supply interest rate per block, scaled by 1e18
-     */
+    //调用利率模型, 查询存款利率
     function supplyRatePerBlock() override external view returns (uint) {
         return interestRateModel.getSupplyRate(getCashPrior(), totalBorrows, totalReserves, reserveFactorMantissa);
     }
 
-    /**
-     * @notice Returns the current total borrows plus accrued interest
-     * @return The total borrows with interest
-     */
+    //当前总借款
     function totalBorrowsCurrent() override external nonReentrant returns (uint) {
         accrueInterest();
         return totalBorrows;
     }
 
     /**
-     * @notice Accrue interest to updated borrowIndex and then calculate account's borrow balance using the updated borrowIndex
-     * @param account The address whose balance should be calculated after updating borrowIndex
+     * @notice 对更新的 borrowIndex 产生利息，然后使用更新的 borrowIndex 计算账户的借贷余额
+     * @param  account borrowIndex更新后需要计算余额的地址
      * @return The calculated balance
      */
     function borrowBalanceCurrent(address account) override external nonReentrant returns (uint) {
@@ -236,7 +97,7 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     }
 
     /**
-     * @notice Return the borrow balance of account based on stored data
+     * @notice 根据存储的数据返回账户的借款余额
      * @param account The address whose balance should be calculated
      * @return The calculated balance
      */
@@ -245,26 +106,15 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     }
 
     /**
-     * @notice Return the borrow balance of account based on stored data
+     * @notice 根据存储的数据返回账户的借款余额
      * @param account The address whose balance should be calculated
      * @return (error code, the calculated balance or 0 if error code is non-zero)
      */
     function borrowBalanceStoredInternal(address account) internal view returns (uint) {
-        /* Get borrowBalance and borrowIndex */
-        BorrowSnapshot storage borrowSnapshot = accountBorrows[account];
-
-        /* If borrowBalance = 0 then borrowIndex is likely also 0.
-         * Rather than failing the calculation with a division by 0, we immediately return 0 in this case.
-         */
-        if (borrowSnapshot.principal == 0) {
-            return 0;
-        }
-
-        /* Calculate new borrow balance using the interest index:
-         *  recentBorrowBalance = borrower.borrowBalance * market.borrowIndex / borrower.borrowIndex
-         */
-        uint principalTimesIndex = borrowSnapshot.principal * borrowIndex;
-        return principalTimesIndex / borrowSnapshot.interestIndex;
+        BorrowSnapshot storage borrowSnapshot = accountBorrows[account];     
+        if (borrowSnapshot.principal == 0) {  return 0; }
+        // 借款者的借款总额 * 市场当前借款指数 / 借款者之前借款时的市场借款指数
+        return borrowSnapshot.principal * borrowIndex / borrowSnapshot.interestIndex;
     }
 
     /**
@@ -285,11 +135,7 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
         return exchangeRateStoredInternal();
     }
 
-    /**
-     * @notice Calculates the exchange rate from the underlying to the CToken
-     * @dev This function does not accrue interest before calculating the exchange rate
-     * @return calculated exchange rate scaled by 1e18
-     */
+    //计算当前汇率
     function exchangeRateStoredInternal() virtual internal view returns (uint) {
         uint _totalSupply = totalSupply;
         if (_totalSupply == 0) {
@@ -297,17 +143,14 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
              * If there are no tokens minted:
              *  exchangeRate = initialExchangeRate
              */
-            return initialExchangeRateMantissa;
+            return initialExchangeRateMantissa;//初始值0.02
         } else {
             /*
              * Otherwise:
              *  exchangeRate = (totalCash + totalBorrows - totalReserves) / totalSupply
              */
-            uint totalCash = getCashPrior();
-            uint cashPlusBorrowsMinusReserves = totalCash + totalBorrows - totalReserves;
-            uint exchangeRate = cashPlusBorrowsMinusReserves * expScale / _totalSupply;
-
-            return exchangeRate;
+            //ctoken汇率 = (市场底层资产余额 + 市场总借款 - 市场储备) / ctoken供应量
+            return (getCashPrior() + totalBorrows - totalReserves) * expScale / _totalSupply;
         }
     }
 
@@ -319,60 +162,37 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
         return getCashPrior();
     }
 
-    /**
-     * @notice Applies accrued interest to total borrows and reserves
-     * @dev This calculates interest accrued from the last checkpointed block
-     *   up to the current block and writes new checkpoint to storage.
-     */
     function accrueInterest() virtual override public returns (uint) {
-        /* Remember the initial block number */
         uint currentBlockNumber = getBlockNumber();
         uint accrualBlockNumberPrior = accrualBlockNumber;
 
-        /* Short-circuit accumulating 0 interest */
-        if (accrualBlockNumberPrior == currentBlockNumber) {
-            return NO_ERROR;
-        }
+        if (accrualBlockNumberPrior == currentBlockNumber) { return NO_ERROR;  }
 
-        /* Read the previous values out of storage */
         uint cashPrior = getCashPrior();
         uint borrowsPrior = totalBorrows;
         uint reservesPrior = totalReserves;
         uint borrowIndexPrior = borrowIndex;
 
-        /* Calculate the current borrow interest rate */
         uint borrowRateMantissa = interestRateModel.getBorrowRate(cashPrior, borrowsPrior, reservesPrior);
-        require(borrowRateMantissa <= borrowRateMaxMantissa, "borrow rate is absurdly high");
+        require(borrowRateMantissa <= borrowRateMaxMantissa, "borrow rate is absurdly high"); // 年化利息最高1000%
 
-        /* Calculate the number of blocks elapsed since the last accrual */
-        uint blockDelta = currentBlockNumber - accrualBlockNumberPrior;
+        uint blockDelta = currentBlockNumber - accrualBlockNumberPrior;    
 
-        /*
-         * Calculate the interest accumulated into borrows and reserves and the new index:
-         *  simpleInterestFactor = borrowRate * blockDelta
-         *  interestAccumulated = simpleInterestFactor * totalBorrows
-         *  totalBorrowsNew = interestAccumulated + totalBorrows
-         *  totalReservesNew = interestAccumulated * reserveFactor + totalReserves
-         *  borrowIndexNew = simpleInterestFactor * borrowIndex + borrowIndex
-         */
-
-        Exp memory simpleInterestFactor = mul_(Exp({mantissa: borrowRateMantissa}), blockDelta);
-        uint interestAccumulated = mul_ScalarTruncate(simpleInterestFactor, borrowsPrior);
-        uint totalBorrowsNew = interestAccumulated + borrowsPrior;
+        Exp memory simpleInterestFactor = mul_(Exp({mantissa: borrowRateMantissa}), blockDelta);//单利因子=借款利率*区块
+        uint interestAccumulated = mul_ScalarTruncate(simpleInterestFactor, borrowsPrior);//新增的利息 = 总借款 * 借款利率 * 区块
+        uint totalBorrowsNew = interestAccumulated + borrowsPrior; // 累加借款总额
+        //总储备 = 总储备 + 新增利息 * 给compound留下的百分比;
         uint totalReservesNew = mul_ScalarTruncateAddUInt(Exp({mantissa: reserveFactorMantissa}), interestAccumulated, reservesPrior);
+        //复利方式计算上次以来的利息, 使用的是以区块为单位的期间利息，以每块的利率计算。
+        //借款指数 = 借款指数 * (1+借款利率*区块)
+        //接近于每个block计算一次
         uint borrowIndexNew = mul_ScalarTruncateAddUInt(simpleInterestFactor, borrowIndexPrior, borrowIndexPrior);
 
-        /////////////////////////
-        // EFFECTS & INTERACTIONS
-        // (No safe failures beyond this point)
+        accrualBlockNumber = currentBlockNumber; // 记录当前区块,相同区块不再更新
+        borrowIndex = borrowIndexNew; // 市场借款指数
+        totalBorrows = totalBorrowsNew; // 市场总借款
+        totalReserves = totalReservesNew; // 市场总储备
 
-        /* We write the previously calculated values into storage */
-        accrualBlockNumber = currentBlockNumber;
-        borrowIndex = borrowIndexNew;
-        totalBorrows = totalBorrowsNew;
-        totalReserves = totalReservesNew;
-
-        /* We emit an AccrueInterest event */
         emit AccrueInterest(cashPrior, interestAccumulated, borrowIndexNew, totalBorrowsNew);
 
         return NO_ERROR;
@@ -389,163 +209,78 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
         mintFresh(msg.sender, mintAmount);
     }
 
+    function __ctokenMint(uint mintTokens, address minter) private  {
+        totalSupply = totalSupply + mintTokens; // 更新总供应
+        accountTokens[minter] = accountTokens[minter] + mintTokens; // 更新用户有多少个token
+    }
+
     /**
-     * @notice User supplies assets into the market and receives cTokens in exchange
+     * @notice 市场的token变多了,资金利用率下降了,存/贷利率都下降了
      * @dev Assumes interest has already been accrued up to the current block
      * @param minter The address of the account which is supplying the assets
      * @param mintAmount The amount of the underlying asset to supply
      */
     function mintFresh(address minter, uint mintAmount) internal {
-        /* Fail if mint not allowed */
         uint allowed = comptroller.mintAllowed(address(this), minter, mintAmount);
-        if (allowed != 0) {
-            revert MintComptrollerRejection(allowed);
-        }
+        if (allowed != 0) { revert MintComptrollerRejection(allowed);  }
+        if (accrualBlockNumber != getBlockNumber()) { revert MintFreshnessCheck();}
 
-        /* Verify market's block number equals current block number */
-        if (accrualBlockNumber != getBlockNumber()) {
-            revert MintFreshnessCheck();
-        }
+        Exp memory exchangeRate = Exp({mantissa: exchangeRateStoredInternal()});//汇率 token 和ctoken之间 
+        uint actualMintAmount = doTransferIn(minter, mintAmount);//用户转账,然后返回转了多少
+        uint mintTokens = div_(actualMintAmount, exchangeRate);//应该mint多少个 = 转账个数 * 汇率
+        __ctokenMint(mintTokens, minter);
 
-        Exp memory exchangeRate = Exp({mantissa: exchangeRateStoredInternal()});
-
-        /////////////////////////
-        // EFFECTS & INTERACTIONS
-        // (No safe failures beyond this point)
-
-        /*
-         *  We call `doTransferIn` for the minter and the mintAmount.
-         *  Note: The cToken must handle variations between ERC-20 and ETH underlying.
-         *  `doTransferIn` reverts if anything goes wrong, since we can't be sure if
-         *  side-effects occurred. The function returns the amount actually transferred,
-         *  in case of a fee. On success, the cToken holds an additional `actualMintAmount`
-         *  of cash.
-         */
-        uint actualMintAmount = doTransferIn(minter, mintAmount);
-
-        /*
-         * We get the current exchange rate and calculate the number of cTokens to be minted:
-         *  mintTokens = actualMintAmount / exchangeRate
-         */
-
-        uint mintTokens = div_(actualMintAmount, exchangeRate);
-
-        /*
-         * We calculate the new total supply of cTokens and minter token balance, checking for overflow:
-         *  totalSupplyNew = totalSupply + mintTokens
-         *  accountTokensNew = accountTokens[minter] + mintTokens
-         * And write them into storage
-         */
-        totalSupply = totalSupply + mintTokens;
-        accountTokens[minter] = accountTokens[minter] + mintTokens;
-
-        /* We emit a Mint event, and a Transfer event */
         emit Mint(minter, actualMintAmount, mintTokens);
-        emit Transfer(address(this), minter, mintTokens);
-
-        /* We call the defense hook */
-        // unused function
-        // comptroller.mintVerify(address(this), minter, actualMintAmount, mintTokens);
+        emit Transfer(address(this), minter, mintTokens);     
     }
-
-    /**
-     * @notice Sender redeems cTokens in exchange for the underlying asset
-     * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemTokens The number of cTokens to redeem into underlying
-     */
+  
     function redeemInternal(uint redeemTokens) internal nonReentrant {
         accrueInterest();
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
         redeemFresh(payable(msg.sender), redeemTokens, 0);
     }
-
-    /**
-     * @notice Sender redeems cTokens in exchange for a specified amount of underlying asset
-     * @dev Accrues interest whether or not the operation succeeds, unless reverted
-     * @param redeemAmount The amount of underlying to receive from redeeming cTokens
-     */
+  
     function redeemUnderlyingInternal(uint redeemAmount) internal nonReentrant {
         accrueInterest();
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
         redeemFresh(payable(msg.sender), 0, redeemAmount);
     }
 
-    /**
-     * @notice User redeems cTokens in exchange for the underlying asset
-     * @dev Assumes interest has already been accrued up to the current block
-     * @param redeemer The address of the account which is redeeming the tokens
-     * @param redeemTokensIn The number of cTokens to redeem into underlying (only one of redeemTokensIn or redeemAmountIn may be non-zero)
-     * @param redeemAmountIn The number of underlying tokens to receive from redeeming cTokens (only one of redeemTokensIn or redeemAmountIn may be non-zero)
-     */
-    function redeemFresh(address payable redeemer, uint redeemTokensIn, uint redeemAmountIn) internal {
-        require(redeemTokensIn == 0 || redeemAmountIn == 0, "one of redeemTokensIn or redeemAmountIn must be zero");
-
-        /* exchangeRate = invoke Exchange Rate Stored() */
+    function __caculateRedeem(uint redeemTokensIn, uint redeemAmountIn) private view returns (uint redeemTokens,uint redeemAmount){
         Exp memory exchangeRate = Exp({mantissa: exchangeRateStoredInternal() });
-
-        uint redeemTokens;
-        uint redeemAmount;
-        /* If redeemTokensIn > 0: */
         if (redeemTokensIn > 0) {
-            /*
-             * We calculate the exchange rate and the amount of underlying to be redeemed:
-             *  redeemTokens = redeemTokensIn
-             *  redeemAmount = redeemTokensIn x exchangeRateCurrent
-             */
             redeemTokens = redeemTokensIn;
             redeemAmount = mul_ScalarTruncate(exchangeRate, redeemTokensIn);
-        } else {
-            /*
-             * We get the current exchange rate and calculate the amount to be redeemed:
-             *  redeemTokens = redeemAmountIn / exchangeRate
-             *  redeemAmount = redeemAmountIn
-             */
+        } else {           
             redeemTokens = div_(redeemAmountIn, exchangeRate);
             redeemAmount = redeemAmountIn;
         }
+    }
 
-        /* Fail if redeem not allowed */
+    function __ctokenBurn(uint redeemTokens, address redeemer) private{
+        totalSupply = totalSupply - redeemTokens;//在外部转账之前, 先减少供应, 来避免token重入攻击。
+        accountTokens[redeemer] = accountTokens[redeemer] - redeemTokens;
+    }
+    
+    //市场的token数量下降, 资金利用率上升, 存贷利率都升
+    function redeemFresh(address payable redeemer, uint redeemTokensIn, uint redeemAmountIn) internal {
+        require(redeemTokensIn == 0 || redeemAmountIn == 0, "one of redeemTokensIn or redeemAmountIn must be zero");
+        (uint redeemTokens, uint redeemAmount) = __caculateRedeem(redeemTokensIn, redeemAmountIn);
+
         uint allowed = comptroller.redeemAllowed(address(this), redeemer, redeemTokens);
-        if (allowed != 0) {
-            revert RedeemComptrollerRejection(allowed);
-        }
-
-        /* Verify market's block number equals current block number */
-        if (accrualBlockNumber != getBlockNumber()) {
-            revert RedeemFreshnessCheck();
-        }
-
-        /* Fail gracefully if protocol has insufficient cash */
-        if (getCashPrior() < redeemAmount) {
-            revert RedeemTransferOutNotPossible();
-        }
+        if (allowed != 0) { revert RedeemComptrollerRejection(allowed);        }
+        if (accrualBlockNumber != getBlockNumber()) { revert RedeemFreshnessCheck();        }
+        if (getCashPrior() < redeemAmount) { revert RedeemTransferOutNotPossible();  }
 
         /////////////////////////
         // EFFECTS & INTERACTIONS
-        // (No safe failures beyond this point)
-
-
-        /*
-         * We write the previously calculated values into storage.
-         *  Note: Avoid token reentrancy attacks by writing reduced supply before external transfer.
-         */
-        totalSupply = totalSupply - redeemTokens;
-        accountTokens[redeemer] = accountTokens[redeemer] - redeemTokens;
-
-        /*
-         * We invoke doTransferOut for the redeemer and the redeemAmount.
-         *  Note: The cToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the cToken has redeemAmount less of cash.
-         *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
-         */
+        __ctokenBurn(redeemTokens, address(redeemer));   
         doTransferOut(redeemer, redeemAmount);
+        /////////////////////////
 
-        /* We emit a Transfer event, and a Redeem event */
         emit Transfer(redeemer, address(this), redeemTokens);
         emit Redeem(redeemer, redeemAmount, redeemTokens);
-
-        /* We call the defense hook */
-        comptroller.redeemVerify(address(this), redeemer, redeemAmount, redeemTokens);
+        comptroller.redeemVerify(address(this), redeemer, redeemAmount, redeemTokens); // revert 检查
     }
 
     /**
@@ -559,132 +294,61 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     }
 
     /**
-      * @notice Users borrow assets from the protocol to their own address
+      * @notice 借款总额上升,资金利用率上升,利率上升
       * @param borrowAmount The amount of the underlying asset to borrow
       */
     function borrowFresh(address payable borrower, uint borrowAmount) internal {
-        /* Fail if borrow not allowed */
         uint allowed = comptroller.borrowAllowed(address(this), borrower, borrowAmount);
-        if (allowed != 0) {
-            revert BorrowComptrollerRejection(allowed);
-        }
+        if (allowed != 0) { revert BorrowComptrollerRejection(allowed); }
+        if (accrualBlockNumber != getBlockNumber()) {  revert BorrowFreshnessCheck();  }
+        if (getCashPrior() < borrowAmount) { revert BorrowCashNotAvailable(); }
 
-        /* Verify market's block number equals current block number */
-        if (accrualBlockNumber != getBlockNumber()) {
-            revert BorrowFreshnessCheck();
-        }
-
-        /* Fail gracefully if protocol has insufficient underlying cash */
-        if (getCashPrior() < borrowAmount) {
-            revert BorrowCashNotAvailable();
-        }
-
-        /*
-         * We calculate the new borrower and total borrow balances, failing on overflow:
-         *  accountBorrowNew = accountBorrow + borrowAmount
-         *  totalBorrowsNew = totalBorrows + borrowAmount
-         */
         uint accountBorrowsPrev = borrowBalanceStoredInternal(borrower);
-        uint accountBorrowsNew = accountBorrowsPrev + borrowAmount;
-        uint totalBorrowsNew = totalBorrows + borrowAmount;
+        uint accountBorrowsNew = accountBorrowsPrev + borrowAmount; // 新债旧债一起算
+        uint totalBorrowsNew = totalBorrows + borrowAmount;//新债旧债一起算
 
         /////////////////////////
         // EFFECTS & INTERACTIONS
-        // (No safe failures beyond this point)
-
-        /*
-         * We write the previously calculated values into storage.
-         *  Note: Avoid token reentrancy attacks by writing increased borrow before external transfer.
-        `*/
-        accountBorrows[borrower].principal = accountBorrowsNew;
-        accountBorrows[borrower].interestIndex = borrowIndex;
-        totalBorrows = totalBorrowsNew;
-
-        /*
-         * We invoke doTransferOut for the borrower and the borrowAmount.
-         *  Note: The cToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the cToken borrowAmount less of cash.
-         *  doTransferOut reverts if anything goes wrong, since we can't be sure if side effects occurred.
-         */
+        accountBorrows[borrower].principal = accountBorrowsNew; // 用户借款本金
+        accountBorrows[borrower].interestIndex = borrowIndex;  // 记录当前市场的借款指数(还钱的时候, 会用后来的借款指数除以现在的借款指数=>用户应该还的利息加本金)
+        totalBorrows = totalBorrowsNew; // 总借款额
         doTransferOut(borrower, borrowAmount);
 
         /* We emit a Borrow event */
         emit Borrow(borrower, borrowAmount, accountBorrowsNew, totalBorrowsNew);
     }
-
-    /**
-     * @notice Sender repays their own borrow
-     * @param repayAmount The amount to repay, or -1 for the full outstanding amount
-     */
+    
+    //自己还钱
     function repayBorrowInternal(uint repayAmount) internal nonReentrant {
         accrueInterest();
-        // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
         repayBorrowFresh(msg.sender, msg.sender, repayAmount);
     }
-
-    /**
-     * @notice Sender repays a borrow belonging to borrower
-     * @param borrower the account with the debt being payed off
-     * @param repayAmount The amount to repay, or -1 for the full outstanding amount
-     */
+ 
+    // 替别人还钱
     function repayBorrowBehalfInternal(address borrower, uint repayAmount) internal nonReentrant {
         accrueInterest();
-        // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
         repayBorrowFresh(msg.sender, borrower, repayAmount);
     }
 
-    /**
-     * @notice Borrows are repaid by another user (possibly the borrower).
-     * @param payer the account paying off the borrow
-     * @param borrower the account with the debt being payed off
-     * @param repayAmount the amount of underlying tokens being returned, or -1 for the full outstanding amount
-     * @return (uint) the actual repayment amount.
-     */
     function repayBorrowFresh(address payer, address borrower, uint repayAmount) internal returns (uint) {
-        /* Fail if repayBorrow not allowed */
         uint allowed = comptroller.repayBorrowAllowed(address(this), payer, borrower, repayAmount);
-        if (allowed != 0) {
-            revert RepayBorrowComptrollerRejection(allowed);
-        }
-
-        /* Verify market's block number equals current block number */
-        if (accrualBlockNumber != getBlockNumber()) {
-            revert RepayBorrowFreshnessCheck();
-        }
-
-        /* We fetch the amount the borrower owes, with accumulated interest */
+        if (allowed != 0) {  revert RepayBorrowComptrollerRejection(allowed);   }
+        if (accrualBlockNumber != getBlockNumber()) {   revert RepayBorrowFreshnessCheck();   }
         uint accountBorrowsPrev = borrowBalanceStoredInternal(borrower);
-
-        /* If repayAmount == -1, repayAmount = accountBorrows */
-        uint repayAmountFinal = repayAmount == type(uint).max ? accountBorrowsPrev : repayAmount;
+        uint repayAmountFinal = repayAmount == type(uint).max ? accountBorrowsPrev : repayAmount; // 全还还是?
 
         /////////////////////////
         // EFFECTS & INTERACTIONS
         // (No safe failures beyond this point)
+        uint actualRepayAmount = doTransferIn(payer, repayAmountFinal); // 先还钱
+        uint accountBorrowsNew = accountBorrowsPrev - actualRepayAmount; // 用户 减计债务
+        uint totalBorrowsNew = totalBorrows - actualRepayAmount; // 市场 减计债务
 
-        /*
-         * We call doTransferIn for the payer and the repayAmount
-         *  Note: The cToken must handle variations between ERC-20 and ETH underlying.
-         *  On success, the cToken holds an additional repayAmount of cash.
-         *  doTransferIn reverts if anything goes wrong, since we can't be sure if side effects occurred.
-         *   it returns the amount actually transferred, in case of a fee.
-         */
-        uint actualRepayAmount = doTransferIn(payer, repayAmountFinal);
+        accountBorrows[borrower].principal = accountBorrowsNew; // 更细用户债务
+        accountBorrows[borrower].interestIndex = borrowIndex; // 记录当前市场借贷指数,有什么用?
+        totalBorrows = totalBorrowsNew; // 更新市场借贷总额
+        /////////////////////////
 
-        /*
-         * We calculate the new borrower and total borrow balances, failing on underflow:
-         *  accountBorrowsNew = accountBorrows - actualRepayAmount
-         *  totalBorrowsNew = totalBorrows - actualRepayAmount
-         */
-        uint accountBorrowsNew = accountBorrowsPrev - actualRepayAmount;
-        uint totalBorrowsNew = totalBorrows - actualRepayAmount;
-
-        /* We write the previously calculated values into storage */
-        accountBorrows[borrower].principal = accountBorrowsNew;
-        accountBorrows[borrower].interestIndex = borrowIndex;
-        totalBorrows = totalBorrowsNew;
-
-        /* We emit a RepayBorrow event */
         emit RepayBorrow(payer, borrower, actualRepayAmount, accountBorrowsNew, totalBorrowsNew);
 
         return actualRepayAmount;
@@ -776,7 +440,7 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     }
 
     /**
-     * @notice Transfers collateral tokens (this market) to the liquidator.
+     * @notice 把这个市场的抵押tokens转账给清算者
      * @dev Will fail unless called by another cToken during the process of liquidation.
      *  Its absolutely critical to use msg.sender as the borrowed cToken and not a parameter.
      * @param liquidator The account receiving seized collateral
@@ -786,7 +450,6 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
      */
     function seize(address liquidator, address borrower, uint seizeTokens) override external nonReentrant returns (uint) {
         seizeInternal(msg.sender, liquidator, borrower, seizeTokens);
-
         return NO_ERROR;
     }
 
@@ -1142,15 +805,74 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     function doTransferOut(address payable to, uint amount) virtual internal;
 
 
-    /*** Reentrancy Guard ***/
-
-    /**
-     * @dev Prevents a contract from calling itself, directly or indirectly.
-     */
-    modifier nonReentrant() {
+ modifier nonReentrant() {
         require(_notEntered, "re-entered");
         _notEntered = false;
         _;
         _notEntered = true; // get a gas-refund post-Istanbul
+    }
+    function transferTokens(address spender, address src, address dst, uint tokens) internal returns (uint) {
+        /* Fail if transfer not allowed */
+        uint allowed = comptroller.transferAllowed(address(this), src, dst, tokens);
+        if (allowed != 0) {revert TransferComptrollerRejection(allowed);        }
+
+        /* Do not allow self-transfers */
+        if (src == dst) {  revert TransferNotAllowed();}
+
+        /* Get the allowance, infinite for the account owner */
+        uint startingAllowance = 0;
+        if (spender == src) {
+            startingAllowance = type(uint).max;
+        } else {
+            startingAllowance = transferAllowances[src][spender];
+        }
+
+        /* Do the calculations, checking for {under,over}flow */
+        uint allowanceNew = startingAllowance - tokens;
+        uint srcTokensNew = accountTokens[src] - tokens;
+        uint dstTokensNew = accountTokens[dst] + tokens;
+
+        /////////////////////////
+        // EFFECTS & INTERACTIONS
+        // (No safe failures beyond this point)
+
+        accountTokens[src] = srcTokensNew;
+        accountTokens[dst] = dstTokensNew;
+
+        /* Eat some of the allowance (if necessary) */
+        if (startingAllowance != type(uint).max) {
+            transferAllowances[src][spender] = allowanceNew;
+        }
+
+        /* We emit a Transfer event */
+        emit Transfer(src, dst, tokens);
+
+        // unused function
+        // comptroller.transferVerify(address(this), src, dst, tokens);
+
+        return NO_ERROR;
+    }
+
+    function transfer(address dst, uint256 amount) override external nonReentrant returns (bool) {
+        return transferTokens(msg.sender, msg.sender, dst, amount) == NO_ERROR;
+    }
+
+    function transferFrom(address src, address dst, uint256 amount) override external nonReentrant returns (bool) {
+        return transferTokens(msg.sender, src, dst, amount) == NO_ERROR;
+    }
+
+    function approve(address spender, uint256 amount) override external returns (bool) {
+        address src = msg.sender;
+        transferAllowances[src][spender] = amount;
+        emit Approval(src, spender, amount);
+        return true;
+    }
+
+    function allowance(address owner, address spender) override external view returns (uint256) {
+        return transferAllowances[owner][spender];
+    }
+
+    function balanceOf(address owner) override external view returns (uint256) {
+        return accountTokens[owner];
     }
 }

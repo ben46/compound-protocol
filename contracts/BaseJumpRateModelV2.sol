@@ -97,8 +97,10 @@ abstract contract BaseJumpRateModelV2 is InterestRateModel {
         uint util = utilizationRate(cash, borrows, reserves);
 
         if (util <= kink) {
+            // utilizeationRate * 0.2 + 0.025
             return ((util * multiplierPerBlock) / BASE) + baseRatePerBlock;
         } else {
+            // 当资金利率过高的时候, 借款利率会跳一个等级(不再使用multiplierPerBlock, 而是使用更高斜率的jumpMultiplierPerBlock)
             uint normalRate = ((kink * multiplierPerBlock) / BASE) + baseRatePerBlock;
             uint excessUtil = util - kink;
             return ((excessUtil * jumpMultiplierPerBlock) / BASE) + normalRate;
@@ -115,8 +117,10 @@ abstract contract BaseJumpRateModelV2 is InterestRateModel {
      */
     function getSupplyRate(uint cash, uint borrows, uint reserves, uint reserveFactorMantissa) virtual override public view returns (uint) {
         uint oneMinusReserveFactor = BASE - reserveFactorMantissa;
-        uint borrowRate = getBorrowRateInternal(cash, borrows, reserves);
+        uint borrowRate = getBorrowRateInternal(cash, borrows, reserves);        
         uint rateToPool = borrowRate * oneMinusReserveFactor / BASE;
+
+        // borrowRate * oneMinusReserveFactor * utilazationRate
         return utilizationRate(cash, borrows, reserves) * rateToPool / BASE;
     }
 

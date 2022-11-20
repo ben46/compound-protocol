@@ -54,10 +54,10 @@ contract CTokenStorage {
     InterestRateModel public interestRateModel;
 
     // Initial exchange rate used when minting the first CTokens (used when totalSupply = 0)
-    uint internal initialExchangeRateMantissa;
+    uint internal initialExchangeRateMantissa; // 初始值好像是0.2
 
     /**
-     * @notice Fraction of interest currently set aside for reserves
+     * @notice 当前为准备金预留的部分利息
      */
     uint public reserveFactorMantissa;
 
@@ -69,7 +69,7 @@ contract CTokenStorage {
     /**
      * @notice Accumulator of the total earned interest rate since the opening of the market
      */
-    uint public borrowIndex;
+    uint public borrowIndex; // 初始值是1
 
     /**
      * @notice Total amount of outstanding borrows of the underlying in this market

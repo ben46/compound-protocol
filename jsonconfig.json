@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+      "baseUrl": "./",
+      "paths": {
+        "@/*": ["contracts/*"],
+      }
+    },
+    "exclude": ["node_modules", "dist"],
+    "include": ["contracts/**/*", "contracts/*"]
+  }

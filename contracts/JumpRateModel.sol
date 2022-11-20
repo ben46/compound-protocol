@@ -69,37 +69,25 @@ contract JumpRateModel is InterestRateModel {
         return borrows * BASE / (cash + borrows - reserves);
     }
 
-    /**
-     * @notice Calculates the current borrow rate per block, with the error code expected by the market
-     * @param cash The amount of cash in the market
-     * @param borrows The amount of borrows in the market
-     * @param reserves The amount of reserves in the market
-     * @return The borrow rate percentage per block as a mantissa (scaled by BASE)
-     */
+    //计算借款利率, 给资金池计算的时候用
     function getBorrowRate(uint cash, uint borrows, uint reserves) override public view returns (uint) {
         uint util = utilizationRate(cash, borrows, reserves);
-
         if (util <= kink) {
+            //借款利率 = 资金利用率 * 20% + 2.5%
             return (util * multiplierPerBlock / BASE) + baseRatePerBlock;
-        } else {
+        } else {// 二段式利率,这里更改k线斜率
             uint normalRate = (kink * multiplierPerBlock / BASE) + baseRatePerBlock;
             uint excessUtil = util - kink;
             return (excessUtil * jumpMultiplierPerBlock/ BASE) + normalRate;
         }
     }
 
-    /**
-     * @notice Calculates the current supply rate per block
-     * @param cash The amount of cash in the market
-     * @param borrows The amount of borrows in the market
-     * @param reserves The amount of reserves in the market
-     * @param reserveFactorMantissa The current reserve factor for the market
-     * @return The supply rate percentage per block as a mantissa (scaled by BASE)
-     */
+    // 这个是给外部调用的, 用来查询当前存款利率, 并不会参与资金池的计算
     function getSupplyRate(uint cash, uint borrows, uint reserves, uint reserveFactorMantissa) override public view returns (uint) {
-        uint oneMinusReserveFactor = BASE - reserveFactorMantissa;
+        uint oneMinusReserveFactor = BASE - reserveFactorMantissa; // 1 减去 给市场留的部分
         uint borrowRate = getBorrowRate(cash, borrows, reserves);
         uint rateToPool = borrowRate * oneMinusReserveFactor / BASE;
+        //存款利率 = 资金利用率 * 借款利率 * (1-compound给市场留的部分%)
         return utilizationRate(cash, borrows, reserves) * rateToPool / BASE;
     }
 }
